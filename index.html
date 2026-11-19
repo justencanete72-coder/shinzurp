@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <title>SHINZU WORLD RP</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+
+  <!-- LOADING SCREEN -->
+  <div id="loading">
+    <h1>SHINZU <span>WORLD</span></h1>
+    <div class="spinner"></div>
+    <p>Entering the city...</p>
+  </div>
+
+  <!-- UI OVERLAY -->
+  <div id="ui">
+    <div id="top-bar">
+      <div id="clock">12:00 PM</div>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <button id="btn-settings" class="icon-btn">⚙️</button>
+        <div id="fps">0 FPS</div>
+      </div>
+    </div>
+
+    <!-- JOYSTICK (Left) -->
+    <div id="joystick-zone">
+      <div id="joystick-base">
+        <div id="joystick-stick"></div>
+      </div>
+    </div>
+
+    <!-- ACTION BUTTONS (Right) -->
+    <div id="action-zone">
+      <button id="btn-interact" class="hidden">INTERACT</button>
+    </div>
+
+    <!-- TOUCH CAMERA AREA -->
+    <div id="camera-zone"></div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="hidden">
+    <div class="settings-content">
+      <h2>Settings</h2>
+      <div class="setting-group">
+        <label>Graphics Quality</label>
+        <div class="radio-group">
+          <label><input type="radio" name="quality" value="low"> Low (Fastest)</label>
+          <label><input type="radio" name="quality" value="medium" checked> Medium</label>
+          <label><input type="radio" name="quality" value="high"> High</label>
+        </div>
+      </div>
+      <div class="setting-group">
+        <label><input type="checkbox" id="toggle-shadows" checked> Enable Shadows</label>
+      </div>
+      <button id="btn-close-settings" class="btn-primary">Save & Close</button>
+    </div>
+  </div>
+
+  <canvas id="game-canvas"></canvas>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
