@@ -1,11 +1,143 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// 1. SETUP
+// --- 1. USER DATA & UI STATE ---
+let myUsername = "Player";
+let myGender = "boy";
+let localAudioStream = null;
+
+// Pumili ng Gender
+document.querySelectorAll('.gender-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.gender-btn').forEach(b => b.classList.remove('active'));
+    e.target.classList.add('active');
+    myGender = e.target.dataset.gender;
+  });
+});
+
+// Login to Lobby
+document.getElementById('btn-enter-lobby').addEventListener('click', async () => {
+  const nameInput = document.getElementById('username-input').value.trim();
+  if (!nameInput) return alert("Please enter a username!");
+  myUsername = nameInput;
+
+  // HUMAKA NG MIC PERMISSION AGAD (Auto-Allow Prompt)
+  try {
+    localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("Mic connected!");
+  } catch (err) {
+    alert("Microphone denied. You can still play, but others won't hear you.");
+  }
+
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('lobby').classList.remove('hidden');
+});
+
+// --- 2. MULTIPLAYER (PeerJS) SETUP ---
+let peer = null;
+let conn = null;
+let audioCall = null;
+let remotePlayers = {}; 
+let lastSyncTime = 0;
+
+document.getElementById('btn-host').addEventListener('click', () => {
+  const roomCode = "SHINZU-" + Math.floor(1000 + Math.random() * 9000);
+  document.getElementById('lobby-status').innerText = "Hosting Room: " + roomCode;
+  
+  peer = new Peer(roomCode);
+  peer.on('open', () => startGame("Host - " + roomCode));
+  
+  peer.on('connection', (connection) => {
+    conn = connection;
+    setupConnection(conn);
+  });
+
+  // Tanggapin ang Audio Call mula sa Client
+  peer.on('call', (call) => {
+    call.answer(localAudioStream);
+    call.on('stream', (remoteStream) => {
+      const audio = new Audio();
+      audio.srcObject = remoteStream;
+      audio.play();
+    });
+  });
+});
+
+document.getElementById('btn-join').addEventListener('click', () => {
+  const roomCode = document.getElementById('join-code').value.trim().toUpperCase();
+  if (!roomCode) return alert("Enter Room Code!");
+  
+  document.getElementById('lobby-status').innerText = "Connecting...";
+  peer = new Peer(); 
+  
+  peer.on('open', () => {
+    conn = peer.connect(roomCode);
+    setupConnection(conn);
+    
+    // Tumawag para sa Voice Chat
+    if (localAudioStream) {
+      audioCall = peer.call(roomCode, localAudioStream);
+    }
+    
+    startGame("Client - " + roomCode);
+  });
+
+  peer.on('error', (err) => {
+    alert("Connection failed. Check code.");
+    document.getElementById('lobby-status').innerText = "Error: " + err.type;
+  });
+});
+
+function setupConnection(connection) {
+  connection.on('open', () => console.log("Connected!"));
+  connection.on('data', (data) => {
+    if (data.type === 'pos') {
+      updateRemotePlayer(data.id, data.x, data.y, data.z, data.rotY, data.gender);
+    } else if (data.type === 'chat') {
+      addChatMessage(data.name, data.text, data.gender);
+    }
+  });
+}
+
+// --- 3. CHAT LOGIC ---
+const chatContainer = document.getElementById('chat-container');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+
+document.getElementById('btn-chat-toggle').addEventListener('click', () => {
+  chatContainer.classList.toggle('hidden');
+});
+
+document.getElementById('btn-send-chat').addEventListener('click', sendChat);
+chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendChat(); });
+
+function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  
+  // Ipakita sa sarili
+  addChatMessage(myUsername, text, myGender);
+  
+  // Ipadala sa kausap
+  if (conn && conn.open) {
+    conn.send({ type: 'chat', name: myUsername, text: text, gender: myGender });
+  }
+  chatInput.value = "";
+}
+
+function addChatMessage(name, text, gender) {
+  const el = document.createElement('div');
+  el.className = 'chat-msg';
+  el.innerHTML = `<strong style="color:${gender === 'boy' ? '#60a5fa' : '#f472b6'}">${name}:</strong> ${text}`;
+  chatMessages.appendChild(el);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// --- 4. THREE.JS GAME ENGINE ---
 const canvas = document.getElementById('game-canvas');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB); 
-scene.fog = new THREE.Fog(0x87CEEB, 10, 80);
+scene.fog = new THREE.Fog(0x87CEEB, 15, 100);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -13,80 +145,83 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-// 2. LIGHTING
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
 scene.add(hemiLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-dirLight.position.set(10, 20, 10);
+dirLight.position.set(20, 30, 20);
 dirLight.castShadow = true;
-dirLight.shadow.camera.top = 20; dirLight.shadow.camera.bottom = -20;
-dirLight.shadow.camera.left = -20; dirLight.shadow.camera.right = 20;
 scene.add(dirLight);
 
-// 3. ENVIRONMENT (House & Objects)
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x2d4c1e }));
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+// Environment
+const colliders = [];
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x556B2F }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
-const house = new THREE.Group();
-const walls = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 8), new THREE.MeshStandardMaterial({ color: 0xf5f5f5 }));
-walls.position.y = 2; walls.castShadow = true; walls.receiveShadow = true;
-house.add(walls);
+const roadMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+const roadH = new THREE.Mesh(new THREE.PlaneGeometry(200, 12), roadMat);
+roadH.rotation.x = -Math.PI / 2; roadH.position.y = 0.02; roadH.receiveShadow = true; scene.add(roadH);
+const roadV = new THREE.Mesh(new THREE.PlaneGeometry(12, 200), roadMat);
+roadV.rotation.x = -Math.PI / 2; roadV.position.y = 0.02; roadV.receiveShadow = true; scene.add(roadV);
 
-const roof = new THREE.Mesh(new THREE.ConeGeometry(6, 2, 4), new THREE.MeshStandardMaterial({ color: 0x8b0000 }));
-roof.position.y = 5; roof.rotation.y = Math.PI / 4; roof.castShadow = true;
-house.add(roof);
+const interactables = [];
+function createHouse(x, z) {
+  const houseGroup = new THREE.Group();
+  const walls = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 8), new THREE.MeshStandardMaterial({ color: 0xf5f5f5 }));
+  walls.position.y = 2.5; walls.castShadow = true; walls.receiveShadow = true;
+  houseGroup.add(walls);
+  colliders.push(new THREE.Box3().setFromObject(walls));
+  
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(6.5, 3, 4), new THREE.MeshStandardMaterial({ color: 0x8b0000 }));
+  roof.position.y = 6.5; roof.rotation.y = Math.PI / 4; roof.castShadow = true;
+  houseGroup.add(roof);
+  
+  const door = new THREE.Mesh(new THREE.BoxGeometry(2, 3.5, 0.2), new THREE.MeshStandardMaterial({ color: 0x5c4033 }));
+  door.position.set(0, 1.75, 4.05); door.castShadow = true;
+  houseGroup.add(door);
 
-// DOOR (Pinto)
-const door = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 0.2), new THREE.MeshStandardMaterial({ color: 0x8b4513 }));
-door.position.set(0, 1.5, 4.05);
-door.castShadow = true; door.receiveShadow = true;
-house.add(door);
+  houseGroup.position.set(x, 0, z);
+  if (x < 0) houseGroup.rotation.y = Math.PI / 2;
+  if (x > 0) houseGroup.rotation.y = -Math.PI / 2;
+  scene.add(houseGroup);
+  return { doorMesh: door };
+}
+for(let z = -30; z <= 30; z += 20) {
+  interactables.push({ mesh: createHouse(-16, z).doorMesh, type: 'door', dist: 4, isOpen: false });
+  interactables.push({ mesh: createHouse(16, z).doorMesh, type: 'door', dist: 4, isOpen: false });
+}
 
-// SOFA (Upuan)
-const sofa = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 1.5), new THREE.MeshStandardMaterial({ color: 0x444444 }));
-sofa.position.set(-5, 0.5, -5); // Nasa labas muna para madaling ma-test
-sofa.castShadow = true; sofa.receiveShadow = true;
-scene.add(sofa);
-
-// BED (Kama)
-const bed = new THREE.Mesh(new THREE.BoxGeometry(2, 0.5, 3), new THREE.MeshStandardMaterial({ color: 0xffffff }));
-bed.position.set(5, 0.25, -5); // Nasa labas muna
-bed.castShadow = true; bed.receiveShadow = true;
-scene.add(bed);
-
-scene.add(house);
-
-// 4. INTERACTABLE OBJECTS LIST
-const interactables = [
-  { mesh: door, type: 'door', name: 'Door', dist: 2.5, isOpen: false },
-  { mesh: sofa, type: 'sit', name: 'Sofa', dist: 2.5 },
-  { mesh: bed, type: 'sleep', name: 'Bed', dist: 2.5 }
-];
-
-// 5. CHARACTER
+// Player
 let player, mixer, idleAction, runAction;
-const clock = new THREE.Clock();
 let isSitting = false;
-let currentActionObj = null;
 
 const loader = new GLTFLoader();
 loader.load('https://threejs.org/examples/models/gltf/Soldier.glb', (gltf) => {
   player = gltf.scene;
   player.traverse(child => { if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } });
-  player.position.set(0, 0, 0);
+  player.position.set(0, 0, -5); 
   scene.add(player);
 
   mixer = new THREE.AnimationMixer(player);
   idleAction = mixer.clipAction(gltf.animations[0]);
   runAction = mixer.clipAction(gltf.animations[1]);
   idleAction.play(); runAction.play(); runAction.weight = 0;
-
-  document.getElementById('loading').classList.add('hide');
 });
 
-// 6. CONTROLS (Joystick at Camera)
+function updateRemotePlayer(id, x, y, z, rotY, gender) {
+  if (!remotePlayers[id]) {
+    // Gumawa ng capsule/box base sa Gender
+    const geo = new THREE.CapsuleGeometry(0.5, 1.2, 4, 8);
+    const mat = new THREE.MeshStandardMaterial({ color: gender === 'boy' ? 0x60a5fa : 0xf472b6 }); // Blue for Boy, Pink for Girl
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    scene.add(mesh);
+    remotePlayers[id] = mesh;
+  }
+  remotePlayers[id].position.lerp(new THREE.Vector3(x, y, z), 0.3);
+  remotePlayers[id].rotation.y = rotY;
+}
+
+// --- 5. CONTROLS ---
 const joystickBase = document.getElementById('joystick-base');
 const joystickStick = document.getElementById('joystick-stick');
 let joyData = { x: 0, y: 0, active: false };
@@ -103,7 +238,6 @@ window.addEventListener('touchend', () => {
   joyData.active = false; joyData.x = 0; joyData.y = 0;
   joystickStick.style.transform = `translate(-50%, -50%)`;
 });
-
 function updateJoy(touch) {
   const centerX = baseRect.left + baseRect.width / 2;
   const centerY = baseRect.top + baseRect.height / 2;
@@ -115,75 +249,58 @@ function updateJoy(touch) {
 }
 
 let camTouch = { active: false, x: 0, y: 0, angleY: 0, angleX: 0.2 };
+let camDist = 10; let initialPinchDistance = 0;
 const cameraZone = document.getElementById('camera-zone');
-cameraZone.addEventListener('touchstart', (e) => { camTouch.active = true; camTouch.x = e.touches[0].clientX; camTouch.y = e.touches[0].clientY; });
-cameraZone.addEventListener('touchmove', (e) => {
-  if (!camTouch.active) return;
-  camTouch.angleY -= (e.touches[0].clientX - camTouch.x) * 0.01;
-  camTouch.angleX -= (e.touches[0].clientY - camTouch.y) * 0.01;
-  camTouch.angleX = Math.max(-0.5, Math.min(1, camTouch.angleX));
-  camTouch.x = e.touches[0].clientX; camTouch.y = e.touches[0].clientY;
-});
-cameraZone.addEventListener('touchend', () => camTouch.active = false);
 
-// 7. INTERACTION LOGIC
+cameraZone.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) { camTouch.active = true; camTouch.x = e.touches[0].clientX; camTouch.y = e.touches[0].clientY; }
+  else if (e.touches.length === 2) { camTouch.active = false; initialPinchDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
+});
+cameraZone.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 1 && camTouch.active) {
+    camTouch.angleY -= (e.touches[0].clientX - camTouch.x) * 0.01;
+    camTouch.angleX -= (e.touches[0].clientY - camTouch.y) * 0.01;
+    camTouch.angleX = Math.max(-0.3, Math.min(0.8, camTouch.angleX));
+    camTouch.x = e.touches[0].clientX; camTouch.y = e.touches[0].clientY;
+  } else if (e.touches.length === 2) {
+    const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    camDist += (initialPinchDistance - dist) * 0.05;
+    camDist = Math.max(4, Math.min(20, camDist));
+    initialPinchDistance = dist;
+  }
+});
+
 const interactBtn = document.getElementById('btn-interact');
 let nearObj = null;
-
 interactBtn.addEventListener('click', () => {
   if (!nearObj || !player) return;
-
   if (nearObj.type === 'door') {
-    // I-toggle ang pinto (bukas/sara)
     nearObj.isOpen = !nearObj.isOpen;
-    const targetRot = nearObj.isOpen ? Math.PI / 2 : 0;
-    // Simple smooth rotation para sa pinto
-    const animateDoor = setInterval(() => {
-      const diff = targetRot - nearObj.mesh.rotation.y;
-      if (Math.abs(diff) < 0.05) {
-        nearObj.mesh.rotation.y = targetRot;
-        clearInterval(animateDoor);
-      } else {
-        nearObj.mesh.rotation.y += diff * 0.2;
-      }
-    }, 16);
-  } 
-  else if (nearObj.type === 'sit') {
-    // Umupo sa Sofa
-    isSitting = true;
-    currentActionObj = nearObj;
-    player.position.copy(nearObj.mesh.position);
-    player.position.y += 1.2; // I-angat para magmukhang nakaupo
-    player.position.z += 0.5;
-    interactBtn.innerText = "STAND UP";
-  } 
-  else if (nearObj.type === 'sleep') {
-    // Humiga sa Bed
-    isSitting = true;
-    currentActionObj = nearObj;
-    player.position.copy(nearObj.mesh.position);
-    player.position.y += 0.8;
-    player.rotation.x = -Math.PI / 2; // Ipatagilid ang character
-    interactBtn.innerText = "WAKE UP";
-  }
-
-  // Kung nakaupo/nakahiga at pinindot ulit, tumayo
-  if (isSitting && currentActionObj === nearObj && nearObj.type !== 'door') {
-    isSitting = false;
-    player.rotation.x = 0;
-    interactBtn.innerText = "INTERACT";
+    nearObj.mesh.rotation.y = nearObj.isOpen ? Math.PI / 2 : 0;
   }
 });
 
-// 8. GAME LOOP
+// --- 6. GAME LOOP ---
 let lastFrame = performance.now(); let frames = 0;
-const fpsEl = document.getElementById('fps'); const speed = 6;
+const fpsEl = document.getElementById('fps'); const speed = 7;
+const clock = new THREE.Clock();
+
+function startGame(roomName) {
+  document.getElementById('lobby').classList.add('hidden');
+  document.getElementById('loading').classList.remove('hidden');
+  setTimeout(() => {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('ui').classList.remove('hidden');
+    document.getElementById('room-info').innerText = roomName;
+    // Auto-open chat sa umpisa para makita agad
+    chatContainer.classList.remove('hidden');
+  }, 1000);
+}
 
 function animate() {
   requestAnimationFrame(animate);
   const delta = Math.min(clock.getDelta(), 0.1);
 
-  // FPS
   frames++;
   const time = performance.now();
   if (time >= lastFrame + 1000) { fpsEl.innerText = `${Math.round((frames * 1000) / (time - lastFrame))} FPS`; frames = 0; lastFrame = time; }
@@ -191,76 +308,70 @@ function animate() {
   if (player) {
     if (mixer) mixer.update(delta);
     
-    // Interaction Proximity Check (Kung malapit ba sa isang gamit)
-    if (!isSitting) {
-      let closestDist = 999;
-      nearObj = null;
+    // Proximity
+    let closestDist = 999; nearObj = null;
+    interactables.forEach(obj => {
+      const distX = player.position.x - obj.mesh.getWorldPosition(new THREE.Vector3()).x;
+      const distZ = player.position.z - obj.mesh.getWorldPosition(new THREE.Vector3()).z;
+      const dist = Math.sqrt(distX*distX + distZ*distZ);
+      if (dist < obj.dist && dist < closestDist) { closestDist = dist; nearObj = obj; }
+    });
+    if (nearObj) interactBtn.classList.remove('hidden'); else interactBtn.classList.add('hidden');
+
+    // Movement
+    let isMoving = false;
+    if (!isSitting && joyData.active && (Math.abs(joyData.x) > 0.1 || Math.abs(joyData.y) > 0.1)) {
+      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0,1,0), camTouch.angleY);
+      const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0,1,0), camTouch.angleY);
+      const moveDir = new THREE.Vector3().addScaledVector(right, joyData.x).addScaledVector(forward, -joyData.y).normalize();
+      const nextPos = player.position.clone().addScaledVector(moveDir, speed * delta);
       
-      interactables.forEach(obj => {
-        const dist = player.position.distanceTo(obj.mesh.position);
-        if (dist < obj.dist && dist < closestDist) {
-          closestDist = dist;
-          nearObj = obj;
-        }
+      let isColliding = false;
+      colliders.forEach(box => {
+        const pBox = new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(1, 1, 1));
+        if (box.intersectsBox(pBox)) isColliding = true;
       });
 
-      if (nearObj) {
-        interactBtn.classList.remove('hidden');
-      } else {
-        interactBtn.classList.add('hidden');
+      if (!isColliding) {
+        player.position.copy(nextPos);
+        const targetRot = Math.atan2(moveDir.x, moveDir.z);
+        let diff = targetRot - player.rotation.y;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        player.rotation.y += diff * 10 * delta;
+        isMoving = true;
       }
     }
 
-    // Movement (Pwede lang gumalaw kung hindi nakaupo/nakahiga)
-    let isMoving = false;
-    if (!isSitting && joyData.active && (Math.abs(joyData.x) > 0.1 || Math.abs(joyData.y) > 0.1)) {
-      const moveX = joyData.x * Math.cos(camTouch.angleY) - joyData.y * Math.sin(camTouch.angleY);
-      const moveZ = joyData.x * Math.sin(camTouch.angleY) + joyData.y * Math.cos(camTouch.angleY);
-      
-      player.position.x += moveX * speed * delta;
-      player.position.z += moveZ * speed * delta;
-
-      const targetRot = Math.atan2(moveX, moveZ);
-      let diff = targetRot - player.rotation.y;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      player.rotation.y += diff * 10 * delta;
-      isMoving = true;
-    }
-
-    // Animation blending
     if (runAction && idleAction) {
       runAction.weight += ((isMoving ? 1 : 0) - runAction.weight) * 10 * delta;
       idleAction.weight = 1 - runAction.weight;
     }
 
-    // Camera Follow
-    const camDist = 8; const camHeight = 4 + (camTouch.angleX * 5);
+    // Camera
+    const camHeight = 5 + (camTouch.angleX * 8);
     const camX = player.position.x + Math.sin(camTouch.angleY) * camDist;
     const camZ = player.position.z + Math.cos(camTouch.angleY) * camDist;
     const camY = player.position.y + camHeight;
-
     camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.2);
     camera.lookAt(player.position.x, player.position.y + 1.5, player.position.z);
+
+    // MULTIPLAYER SYNC
+    if (time - lastSyncTime > 100 && conn && conn.open) {
+      conn.send({
+        type: 'pos',
+        id: peer.id, // Gagamitin ang PeerJS ID para unique
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z,
+        rotY: player.rotation.y,
+        gender: myGender
+      });
+      lastSyncTime = time;
+    }
   }
   renderer.render(scene, camera);
 }
-
-// 9. SETTINGS & RESIZE
-document.getElementById('btn-settings').addEventListener('click', () => document.getElementById('settings-modal').classList.remove('hidden'));
-document.getElementById('btn-close-settings').addEventListener('click', () => document.getElementById('settings-modal').classList.add('hidden'));
-
-document.querySelectorAll('input[name="quality"]').forEach(radio => {
-  radio.addEventListener('change', (e) => {
-    if (e.target.value === 'low') renderer.setPixelRatio(1);
-    else if (e.target.value === 'medium') renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    else renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  });
-});
-document.getElementById('toggle-shadows').addEventListener('change', (e) => {
-  renderer.shadowMap.enabled = e.target.checked;
-  scene.traverse(child => { if (child.isMesh) child.material.needsUpdate = true; });
-});
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

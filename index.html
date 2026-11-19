@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#000000">
   <title>SHINZU WORLD RP</title>
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
     {
@@ -14,39 +15,76 @@
       }
     }
   </script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
 
-  <!-- LOADING SCREEN -->
-  <div id="loading">
-    <h1>SHINZU <span>WORLD</span></h1>
-    <div class="spinner"></div>
-    <p>Entering the city...</p>
+  <!-- 1. LOGIN SCREEN -->
+  <div id="login-screen">
+    <div class="login-box">
+      <h1>SHINZU <span>WORLD</span></h1>
+      <input type="text" id="username-input" placeholder="Enter Username" maxlength="12">
+      <div class="gender-select">
+        <button class="gender-btn active" data-gender="boy">👦 Boy</button>
+        <button class="gender-btn" data-gender="girl">👧 Girl</button>
+      </div>
+      <button id="btn-enter-lobby" class="btn-primary">CONTINUE</button>
+    </div>
   </div>
 
-  <!-- UI OVERLAY -->
-  <div id="ui">
+  <!-- 2. LOBBY SCREEN -->
+  <div id="lobby" class="hidden">
+    <div class="lobby-box">
+      <h2>Multiplayer Lobby</h2>
+      <button id="btn-host" class="btn-primary">HOST GAME (Create Room)</button>
+      <div class="divider">OR</div>
+      <input type="text" id="join-code" placeholder="Enter Room Code">
+      <button id="btn-join" class="btn-secondary">JOIN GAME</button>
+      <p id="lobby-status"></p>
+    </div>
+  </div>
+
+  <div id="rotate-prompt">
+    <h2>Please Rotate Your Phone 📱</h2>
+    <p>Play in Landscape mode.</p>
+  </div>
+
+  <div id="loading" class="hidden">
+    <div class="spinner"></div>
+    <p>Loading city...</p>
+  </div>
+
+  <!-- 3. IN-GAME UI -->
+  <div id="ui" class="hidden">
     <div id="top-bar">
-      <div id="clock">12:00 PM</div>
+      <div id="room-info">Solo</div>
       <div style="display: flex; gap: 10px; align-items: center;">
+        <button id="btn-chat-toggle" class="icon-btn">💬</button>
         <button id="btn-settings" class="icon-btn">⚙️</button>
         <div id="fps">0 FPS</div>
       </div>
     </div>
 
-    <!-- JOYSTICK (Left) -->
+    <!-- Chat Box -->
+    <div id="chat-container" class="hidden">
+      <div id="chat-messages"></div>
+      <div class="chat-input-area">
+        <input type="text" id="chat-input" placeholder="Type message...">
+        <button id="btn-send-chat">Send</button>
+      </div>
+    </div>
+
+    <!-- Controls -->
     <div id="joystick-zone">
       <div id="joystick-base">
         <div id="joystick-stick"></div>
       </div>
     </div>
 
-    <!-- ACTION BUTTONS (Right) -->
     <div id="action-zone">
       <button id="btn-interact" class="hidden">INTERACT</button>
     </div>
 
-    <!-- TOUCH CAMERA AREA -->
     <div id="camera-zone"></div>
   </div>
 
@@ -57,13 +95,10 @@
       <div class="setting-group">
         <label>Graphics Quality</label>
         <div class="radio-group">
-          <label><input type="radio" name="quality" value="low"> Low (Fastest)</label>
+          <label><input type="radio" name="quality" value="low"> Low</label>
           <label><input type="radio" name="quality" value="medium" checked> Medium</label>
           <label><input type="radio" name="quality" value="high"> High</label>
         </div>
-      </div>
-      <div class="setting-group">
-        <label><input type="checkbox" id="toggle-shadows" checked> Enable Shadows</label>
       </div>
       <button id="btn-close-settings" class="btn-primary">Save & Close</button>
     </div>
